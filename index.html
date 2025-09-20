@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Minecraft JSON Obfuscator (web) — Custom Exclude</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial;}
+    body{margin:16px;background:#f6f7fb;color:#111}
+    h1{font-size:18px;margin:0 0 8px}
+    p{margin:6px 0 12px;color:#333}
+    textarea{width:100%;height:220px;padding:10px;border-radius:8px;border:1px solid #d0d4e0;box-sizing:border-box;font-family:monospace;white-space:pre-wrap}
+    .row{display:flex;gap:8px;margin:8px 0}
+    button{padding:8px 12px;border-radius:8px;border:0;background:#2563eb;color:#fff;cursor:pointer}
+    button.secondary{background:#6b7280}
+    label{display:flex;gap:8px;align-items:center}
+    .small{font-size:13px;color:#444}
+    footer{margin-top:12px;font-size:12px;color:#666}
+    .split{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .excludes{background:#fff;padding:10px;border-radius:8px;border:1px solid #e6e9f2}
+    .exclude-item{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed #eef}
+    .exclude-item:last-child{border-bottom:0}
+    .pill{background:#eef2ff;padding:4px 8px;border-radius:999px;font-family:monospace}
+    input[type=text]{padding:8px;border-radius:6px;border:1px solid #ccd3e6;width:100%}
+    @media(max-width:800px){.split{grid-template-columns:1fr}textarea{height:180px}}
+  </style>
+</head>
+<body>
+  <h1>Minecraft JSON Obfuscator — เลือกบล็อคที่ไม่ต้องเข้ารหัสได้</h1>
+  <p class="small">วาง JSON ต้นฉบับ แล้วเลือกหรือตั้งชื่อ key/blocks ที่ต้องการ <strong>ไม่เข้ารหัส (exclude)</strong> — สามารถเพิ่ม/ลบแบบ custom ได้ และจะบันทึกไว้ในเบราว์เซอร์</p>
+
+  <div class="split">
+    <div>
+      <div class="small">Input JSON</div>
+      <textarea id="input" placeholder='วาง JSON ที่นี่ (ตัวอย่าง: paste ของไฟล์ resource/behavior UI)'></textarea>
+      <div class="row" style="margin-top:8px">
+        <label><input type="checkbox" id="pretty" checked> Pretty print output</label>
+        <label style="margin-left:auto"><input type="checkbox" id="keepOrder"> เก็บลำดับ key เดิม (พยายามรักษา)</label>
+      </div>
+
+      <div style="margin-top:10px" class="small">
+        ตัวอย่างบล็อคที่มักไม่ต้องการเข้ารหัส: <code>@style.ui_elements</code>, <code>@button_style.description_panel</code>, <code>@button_style.button_grid</code>
+      </div>
+    </div>
+
+    <div>
+      <div class="small">Exclude (ไม่เข้ารหัส) — รายการที่เพิ่มแล้วจะถูกบันทึกไว้</div>
+      <div class="excludes" id="excludesBox">
+        <!-- items here -->
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input type="text" id="newExclude" placeholder='พิมพ์ key ตัวอย่าง: @style.ui_elements'>
+        <button id="addExclude">เพิ่ม</button>
+      </div>
+
+      <div style="margin-top:12px">
+        <div class="small">Output (ดาวน์โหลดได้)</div>
+        <textarea id="output" readonly placeholder="ผลลัพธ์จะแสดงที่นี่"></textarea>
+        <div class="row" style="margin-top:8px">
+          <button id="go">Obfuscate</button>
+          <button class="secondary" id="download">ดาวน์โหลด .json</button>
+          <button class="secondary" id="clear">ล้าง</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    ผลลัพธ์จะเป็นไฟล์ JSON ที่แปลงเป็น \uXXXX escapes (ยกเว้นรายการที่คุณกำหนด) เหมาะสำหรับวางแทนไฟล์ใน resource/behavior pack ของ Minecraft (Bedrock). การ obfuscation ช่วยให้ดูยากขึ้น แต่ไม่ใช่การเข้ารหัสที่ปลอดภัย 100%.
+  </footer>
+
+<script>
+(function(){
+  const input = document.getElementById('input');
+  const output = document.getElementById('output');
+  const go = document.getElementById('go');
+  const downloadBtn = document.getElementById('download');
+  const clearBtn = document.getElementById('clear');
+  const pretty = document.getElementById('pretty');
+  const keepOrder = document.getElementById('keepOrder');
+  const excludesBox = document.getElementById('excludesBox');
+  const newExclude = document.getElementById('newExclude');
+  const addExcludeBtn = document.getElementById('addExclude');
+
+  const STORAGE_KEY = 'mc_obfuscator_excludes_v1';
+
+  // ค่าเริ่มต้น
+  let EXCLUDE_KEYS = [
+    "@style.ui_elements",
+    "@button_style.description_panel",
+    "@button_style.button_grid"
+  ];
+
+  // โหลดจาก localStorage ถ้ามี
+  function loadExcludes(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if(raw){
+        const arr = JSON.parse(raw);
+        if(Array.isArray(arr)) EXCLUDE_KEYS = arr;
+      }
+    }catch(e){ console.warn('loadExcludes error', e); }
+    renderExcludes();
+  }
+
+  function saveExcludes(){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(EXCLUDE_KEYS)); }
+    catch(e){ console.warn('saveExcludes error', e); }
+  }
+
+  function renderExcludes(){
+    excludesBox.innerHTML = '';
+    if(EXCLUDE_KEYS.length === 0){ excludesBox.innerHTML = '<div class="small">ยังไม่มีรายการ exclude</div>'; return; }
+    EXCLUDE_KEYS.forEach((k, idx) => {
+      const div = document.createElement('div');
+      div.className = 'exclude-item';
+      const span = document.createElement('div');
+      span.className = 'pill';
+      span.textContent = k;
+      const btn = document.createElement('button');
+      btn.textContent = 'ลบ';
+      btn.style.background = '#ef4444';
+      btn.style.border = '0';
+      btn.style.color = '#fff';
+      btn.style.borderRadius = '6px';
+      btn.style.padding = '6px 8px';
+      btn.onclick = () => { EXCLUDE_KEYS.splice(idx,1); saveExcludes(); renderExcludes(); };
+      div.appendChild(span);
+      const spacer = document.createElement('div'); spacer.style.flex = '1';
+      div.appendChild(spacer);
+      div.appendChild(btn);
+      excludesBox.appendChild(div);
+    });
+  }
+
+  addExcludeBtn.addEventListener('click', ()=>{
+    const v = newExclude.value.trim();
+    if(!v){ alert('กรุณาพิมพ์ key ที่จะ exclude'); return; }
+    if(EXCLUDE_KEYS.includes(v)){ alert('รายการนี้มีอยู่แล้ว'); return; }
+    EXCLUDE_KEYS.push(v);
+    newExclude.value = '';
+    saveExcludes();
+    renderExcludes();
+  });
+
+  // แปลงสตริงเป็น \uXXXX
+  function unicodeEscapeString(s){
+    let out = '';
+    for(let i=0;i<s.length;i++){
+      const code = s.charCodeAt(i);
+      out += '\u' + code.toString(16).padStart(4,'0');
+    }
+    return out;
+  }
+
+  function processObj(obj){
+    if(Array.isArray(obj)){
+      return obj.map(processObj);
+    }
+    if(obj && typeof obj === 'object'){
+      const out = {};
+      const keys = Object.keys(obj);
+      for(const k of keys){
+        if(EXCLUDE_KEYS.includes(k)){
+          out[k] = obj[k];
+        } else {
+          const ek = unicodeEscapeString(k);
+          out[ek] = processObj(obj[k]);
+        }
+      }
+      return out;
+    }
+    if(typeof obj === 'string'){
+      return unicodeEscapeString(obj);
+    }
+    return obj;
+  }
+
+  function serialize(val, indentLevel){
+    const indent = pretty.checked ? '  '.repeat(indentLevel) : '';
+    const newline = pretty.checked ? '\n' : '';
+    if(val === null) return 'null';
+    if(typeof val === 'string'){
+      const s = val.replace(/"/g,'\\"');
+      return '"' + s + '"';
+    }
+    if(typeof val === 'number' || typeof val === 'boolean') return String(val);
+    if(Array.isArray(val)){
+      if(val.length === 0) return '[]';
+      let parts = val.map(v => (pretty.checked ? indent + '  ' : '') + serialize(v, indentLevel+1));
+      return '[' + newline + parts.join(',' + newline) + newline + indent + ']';
+    }
+    const keys = Object.keys(val);
+    if(keys.length === 0) return '{}';
+    let parts = keys.map(k => {
+      const keyText = '"' + k.replace(/"/g,'\\"') + '"';
+      const v = val[k];
+      const ser = serialize(v, indentLevel+1);
+      return (pretty.checked ? indent + '  ' : '') + keyText + (pretty.checked ? ': ' : ':') + ser;
+    });
+    return '{' + newline + parts.join(',' + newline) + newline + indent + '}';
+  }
+
+  function run(){
+    let txt = input.value.trim();
+    if(!txt){ alert('กรุณาใส่ JSON ต้นฉบับลงไป'); return; }
+    let parsed;
+    try{ parsed = JSON.parse(txt); } catch(e){ alert('JSON ไม่ถูกต้อง: ' + e.message); return; }
+    const processed = processObj(parsed);
+    const outText = serialize(processed, 0);
+    output.value = outText;
+  }
+
+  go.addEventListener('click', run);
+  clearBtn.addEventListener('click', ()=>{ input.value=''; output.value=''; });
+  downloadBtn.addEventListener('click', ()=>{
+    if(!output.value) { alert('ยังไม่มีผลลัพธ์ให้ดาวน์โหลด'); return; }
+    const blob = new Blob([output.value], {type:'application/json;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'obfuscated.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  });
+
+  // ตัวอย่างเริ่มต้น
+  input.value = '{\n  "controls": [\n    { "@style.ui_elements": {} },\n    { "@button_style.description_panel": {} },\n    { "@button_style.button_grid": {} },\n    { "normalKey": "Hello" }\n  ]\n}';
+
+  loadExcludes();
+})();
+</script>
+</body>
+</html>
