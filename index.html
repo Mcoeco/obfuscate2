@@ -3,39 +3,55 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Minecraft JSON Obfuscator (web) — Custom Exclude</title>
+  <title>Minecraft JSON Obfuscator (Enhanced) — Custom Exclude + Namespace Lock + Blacklist</title>
   <style>
     :root{font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial;}
     body{margin:16px;background:#f6f7fb;color:#111}
     h1{font-size:18px;margin:0 0 8px}
     p{margin:6px 0 12px;color:#333}
-    textarea{width:100%;height:220px;padding:10px;border-radius:8px;border:1px solid #d0d4e0;box-sizing:border-box;font-family:monospace;white-space:pre-wrap}
-    .row{display:flex;gap:8px;margin:8px 0}
+    textarea{width:100%;height:200px;padding:10px;border-radius:8px;border:1px solid #d0d4e0;box-sizing:border-box;font-family:monospace;white-space:pre-wrap}
+    .row{display:flex;gap:8px;margin:8px 0;flex-wrap:wrap}
     button{padding:8px 12px;border-radius:8px;border:0;background:#2563eb;color:#fff;cursor:pointer}
     button.secondary{background:#6b7280}
+    button.danger{background:#ef4444}
     label{display:flex;gap:8px;align-items:center}
     .small{font-size:13px;color:#444}
     footer{margin-top:12px;font-size:12px;color:#666}
     .split{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    .excludes{background:#fff;padding:10px;border-radius:8px;border:1px solid #e6e9f2}
-    .exclude-item{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed #eef}
-    .exclude-item:last-child{border-bottom:0}
-    .pill{background:#eef2ff;padding:4px 8px;border-radius:999px;font-family:monospace}
+    .excludes, .blacklist{background:#fff;padding:10px;border-radius:8px;border:1px solid #e6e9f2;margin-bottom:12px}
+    .exclude-item, .blacklist-item{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed #eef}
+    .exclude-item:last-child, .blacklist-item:last-child{border-bottom:0}
+    .pill{background:#eef2ff;padding:4px 8px;border-radius:999px;font-family:monospace;word-break:break-all;max-width:200px;overflow:hidden}
+    .pill.blacklist{background:#fef2e6;max-width:300px}
     input[type=text]{padding:8px;border-radius:6px;border:1px solid #ccd3e6;width:100%}
-    @media(max-width:800px){.split{grid-template-columns:1fr}textarea{height:180px}}
+    .settings-section{background:#fff;padding:12px;border-radius:8px;border:1px solid #e6e9f2;margin-bottom:12px}
+    .settings-title{font-weight:600;margin-bottom:8px;color:#1f2937}
+    .warning{background:#fef3cd;border:1px solid #f59e0b;padding:8px;border-radius:6px;font-size:12px;color:#92400e;margin:8px 0}
+    @media(max-width:1000px){.split{grid-template-columns:1fr}textarea{height:160px}}
   </style>
 </head>
 <body>
-  <h1>Minecraft JSON Obfuscator — เลือกบล็อคที่ไม่ต้องเข้ารหัสได้</h1>
-  <p class="small">วาง JSON ต้นฉบับ แล้วเลือกหรือตั้งชื่อ key/blocks ที่ต้องการ <strong>ไม่เข้ารหัส (exclude)</strong> — สามารถเพิ่ม/ลบแบบ custom ได้ และจะบันทึกไว้ในเบราว์เซอร์</p>
+  <h1>Minecraft JSON Obfuscator (Enhanced) — เลือกบล็อค + ล็อค Namespace + Blacklist</h1>
+  <p class="small">วาง JSON ต้นฉบับ แล้วเลือกหรือตั้งชื่อ key/blocks ที่ต้องการ <strong>ไม่เข้ารหัส (exclude)</strong> — รองรับการล็อค namespace และ blacklist แบบ pattern matching</p>
 
   <div class="split">
     <div>
       <div class="small">Input JSON</div>
       <textarea id="input" placeholder='วาง JSON ที่นี่ (ตัวอย่าง: paste ของไฟล์ resource/behavior UI)'></textarea>
-      <div class="row" style="margin-top:8px">
-        <label><input type="checkbox" id="pretty" checked> Pretty print output</label>
-        <label style="margin-left:auto"><input type="checkbox" id="keepOrder"> เก็บลำดับ key เดิม (พยายามรักษา)</label>
+      
+      <div class="settings-section">
+        <div class="settings-title">การตั้งค่า Obfuscation</div>
+        <div class="row">
+          <label><input type="radio" name="format" value="pretty" checked> Pretty Format (แบบปกติ)</label>
+          <label><input type="radio" name="format" value="compact"> Compact Format (แบบชิดกัน)</label>
+        </div>
+        <div class="row">
+          <label><input type="checkbox" id="keepOrder"> เก็บลำดับ key เดิม (พยายามรักษา)</label>
+          <label><input type="checkbox" id="lockNamespace"> ล็อค Namespace (เข้ารหัส namespace.* ด้วย)</label>
+        </div>
+        <div class="warning" id="namespaceWarning" style="display:none">
+          ⚠️ การล็อค namespace จะทำให้ key ที่มีรูปแบบ "namespace.text" จะถูกเข้ารหัสเป็น unicode ด้วย ถ้าไม่เลือกจะทิ้งไว้แบบเดิม
+        </div>
       </div>
 
       <div style="margin-top:10px" class="small">
@@ -44,16 +60,28 @@
     </div>
 
     <div>
-      <div class="small">Exclude (ไม่เข้ารหัส) — รายการที่เพิ่มแล้วจะถูกบันทึกไว้</div>
+      <div class="small">Exclude Keys (ไม่เข้ารหัส) — รายการที่เพิ่มแล้วจะถูกบันทึกไว้</div>
       <div class="excludes" id="excludesBox">
-        <!-- items here -->
+        <!-- exclude items here -->
       </div>
-      <div class="row" style="margin-top:8px">
+      <div class="row">
         <input type="text" id="newExclude" placeholder='พิมพ์ key ตัวอย่าง: @style.ui_elements'>
         <button id="addExclude">เพิ่ม</button>
       </div>
 
-      <div style="margin-top:12px">
+      <div class="small" style="margin-top:16px">Blacklist Patterns (รูปแบบโค้ดที่ไม่ล็อค) — ใส่ส่วนของโค้ด/key ที่ไม่ต้องการให้ obfuscate</div>
+      <div class="blacklist" id="blacklistBox">
+        <!-- blacklist items here -->
+      </div>
+      <div class="row">
+        <input type="text" id="newBlacklist" placeholder='ตัวอย่าง: button_style หรือ THIS_CODE_IS_CREATED'>
+        <button id="addBlacklist">เพิ่ม Pattern</button>
+      </div>
+      <div class="small" style="color:#666;margin-top:4px">
+        Blacklist จะตรวจสอบทั้ง **keys** และ **string values** ถ้าพบ pattern ที่ระบุไว้จะไม่ obfuscate
+      </div>
+
+      <div style="margin-top:16px">
         <div class="small">Output (ดาวน์โหลดได้)</div>
         <textarea id="output" readonly placeholder="ผลลัพธ์จะแสดงที่นี่"></textarea>
         <div class="row" style="margin-top:8px">
@@ -67,6 +95,7 @@
 
   <footer>
     ผลลัพธ์จะเป็นไฟล์ JSON ที่แปลงเป็น \uXXXX escapes (ยกเว้นรายการที่คุณกำหนด) เหมาะสำหรับวางแทนไฟล์ใน resource/behavior pack ของ Minecraft (Bedrock). การ obfuscation ช่วยให้ดูยากขึ้น แต่ไม่ใช่การเข้ารหัสที่ปลอดภัย 100%.
+    <br><strong>ใหม่:</strong> รองรับการล็อค namespace และ blacklist เพื่อปกป้องโค้ดสำคัญ
   </footer>
 
 <script>
@@ -76,31 +105,50 @@
   const go = document.getElementById('go');
   const downloadBtn = document.getElementById('download');
   const clearBtn = document.getElementById('clear');
-  const pretty = document.getElementById('pretty');
   const keepOrder = document.getElementById('keepOrder');
+  const lockNamespace = document.getElementById('lockNamespace');
+  const namespaceWarning = document.getElementById('namespaceWarning');
   const excludesBox = document.getElementById('excludesBox');
+  const blacklistBox = document.getElementById('blacklistBox');
   const newExclude = document.getElementById('newExclude');
+  const newBlacklist = document.getElementById('newBlacklist');
   const addExcludeBtn = document.getElementById('addExclude');
+  const addBlacklistBtn = document.getElementById('addBlacklist');
 
-  const STORAGE_KEY = 'mc_obfuscator_excludes_v1';
+  const STORAGE_KEY = 'mc_obfuscator_excludes_v2';
+  const BLACKLIST_KEY = 'mc_obfuscator_blacklist_v2';
 
   // ค่าเริ่มต้น
   let EXCLUDE_KEYS = [
     "@style.ui_elements",
-    "@button_style.description_panel",
+    "@button_style.description_panel", 
     "@button_style.button_grid"
   ];
 
-  // โหลดจาก localStorage ถ้ามี
-  function loadExcludes(){
+  let BLACKLIST_PATTERNS = [
+    "button_style",
+    "THIS_CODE_IS_CREATED_BY_MINEBIT_STORE",
+    "DO_NOT_SELL",
+    "DO_NOT_MODIFY",
+    "WITHOUT_PERMISSION"
+  ];
+
+  // โหลดจาก localStorage
+  function loadData(){
     try{
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if(raw){
-        const arr = JSON.parse(raw);
+      const excludeRaw = localStorage.getItem(STORAGE_KEY);
+      if(excludeRaw){
+        const arr = JSON.parse(excludeRaw);
         if(Array.isArray(arr)) EXCLUDE_KEYS = arr;
       }
-    }catch(e){ console.warn('loadExcludes error', e); }
+      const blacklistRaw = localStorage.getItem(BLACKLIST_KEY);
+      if(blacklistRaw){
+        const arr = JSON.parse(blacklistRaw);
+        if(Array.isArray(arr)) BLACKLIST_PATTERNS = arr;
+      }
+    }catch(e){ console.warn('loadData error', e); }
     renderExcludes();
+    renderBlacklist();
   }
 
   function saveExcludes(){
@@ -108,31 +156,74 @@
     catch(e){ console.warn('saveExcludes error', e); }
   }
 
+  function saveBlacklist(){
+    try{ localStorage.setItem(BLACKLIST_KEY, JSON.stringify(BLACKLIST_PATTERNS)); }
+    catch(e){ console.warn('saveBlacklist error', e); }
+  }
+
   function renderExcludes(){
     excludesBox.innerHTML = '';
-    if(EXCLUDE_KEYS.length === 0){ excludesBox.innerHTML = '<div class="small">ยังไม่มีรายการ exclude</div>'; return; }
+    if(EXCLUDE_KEYS.length === 0){ 
+      excludesBox.innerHTML = '<div class="small">ยังไม่มีรายการ exclude</div>'; 
+      return; 
+    }
     EXCLUDE_KEYS.forEach((k, idx) => {
       const div = document.createElement('div');
       div.className = 'exclude-item';
       const span = document.createElement('div');
       span.className = 'pill';
       span.textContent = k;
+      span.title = k; // tooltip เพื่อแสดงข้อความเต็ม
       const btn = document.createElement('button');
       btn.textContent = 'ลบ';
-      btn.style.background = '#ef4444';
-      btn.style.border = '0';
-      btn.style.color = '#fff';
-      btn.style.borderRadius = '6px';
-      btn.style.padding = '6px 8px';
-      btn.onclick = () => { EXCLUDE_KEYS.splice(idx,1); saveExcludes(); renderExcludes(); };
+      btn.className = 'danger';
+      btn.style.padding = '4px 8px';
+      btn.onclick = () => { 
+        EXCLUDE_KEYS.splice(idx,1); 
+        saveExcludes(); 
+        renderExcludes(); 
+      };
       div.appendChild(span);
-      const spacer = document.createElement('div'); spacer.style.flex = '1';
+      const spacer = document.createElement('div'); 
+      spacer.style.flex = '1';
       div.appendChild(spacer);
       div.appendChild(btn);
       excludesBox.appendChild(div);
     });
   }
 
+  function renderBlacklist(){
+    blacklistBox.innerHTML = '';
+    if(BLACKLIST_PATTERNS.length === 0){ 
+      blacklistBox.innerHTML = '<div class="small">ยังไม่มี blacklist patterns</div>'; 
+      return; 
+    }
+    BLACKLIST_PATTERNS.forEach((pattern, idx) => {
+      const div = document.createElement('div');
+      div.className = 'blacklist-item';
+      const span = document.createElement('div');
+      span.className = 'pill blacklist';
+      span.textContent = pattern;
+      span.title = pattern;
+      const btn = document.createElement('button');
+      btn.textContent = 'ลบ';
+      btn.className = 'danger';
+      btn.style.padding = '4px 8px';
+      btn.onclick = () => { 
+        BLACKLIST_PATTERNS.splice(idx,1); 
+        saveBlacklist(); 
+        renderBlacklist(); 
+      };
+      div.appendChild(span);
+      const spacer = document.createElement('div'); 
+      spacer.style.flex = '1';
+      div.appendChild(spacer);
+      div.appendChild(btn);
+      blacklistBox.appendChild(div);
+    });
+  }
+
+  // Event listeners
   addExcludeBtn.addEventListener('click', ()=>{
     const v = newExclude.value.trim();
     if(!v){ alert('กรุณาพิมพ์ key ที่จะ exclude'); return; }
@@ -143,6 +234,29 @@
     renderExcludes();
   });
 
+  addBlacklistBtn.addEventListener('click', ()=>{
+    const v = newBlacklist.value.trim();
+    if(!v){ alert('กรุณาพิมพ์ pattern ที่จะ blacklist'); return; }
+    if(BLACKLIST_PATTERNS.includes(v)){ alert('Pattern นี้มีอยู่แล้ว'); return; }
+    BLACKLIST_PATTERNS.push(v);
+    newBlacklist.value = '';
+    saveBlacklist();
+    renderBlacklist();
+  });
+
+  // Namespace warning toggle
+  lockNamespace.addEventListener('change', ()=>{
+    namespaceWarning.style.display = lockNamespace.checked ? 'block' : 'none';
+  });
+
+  // Enter key support
+  newExclude.addEventListener('keypress', (e)=>{
+    if(e.key === 'Enter') addExcludeBtn.click();
+  });
+  newBlacklist.addEventListener('keypress', (e)=>{
+    if(e.key === 'Enter') addBlacklistBtn.click();
+  });
+
   // แปลงสตริงเป็น \uXXXX (รองรับ surrogate pair)
   function unicodeEscapeString(s){
     let out = '';
@@ -151,7 +265,6 @@
       if(cp <= 0xFFFF){
         out += '\\u' + cp.toString(16).padStart(4,'0');
       } else {
-        // ถ้าเป็น code point เกิน 0xFFFF ให้ทำเป็น surrogate pair
         const v = cp - 0x10000;
         const high = 0xD800 + (v >> 10);
         const low = 0xDC00 + (v & 0x3FF);
@@ -161,46 +274,86 @@
     return out;
   }
 
-  // processObj จะคืนค่าวัตถุพิเศษสำหรับสตริงที่ถูก obfuscate เพื่อให้ serializer รู้ว่าต้องไม่ escape backslashes อีกครั้ง
-  function processObj(obj){
+  // ตรวจสอบว่าควรจะ obfuscate key นี้หรือไม่
+  function shouldObfuscateKey(key){
+    if(EXCLUDE_KEYS.includes(key)){
+      return false; // ถ้าอยู่ใน exclude list
+    }
+    
+    // ตรวจสอบ blacklist patterns ใน key
+    if(isBlacklisted(key)){
+      return false; // ถ้า key มี blacklist pattern
+    }
+    
+    // ตรวจสอบ namespace pattern
+    if(!lockNamespace.checked){
+      // ถ้าไม่ล็อค namespace และเป็น namespace.* pattern ให้ไม่เข้ารหัส
+      const namespaceMatch = key.match(/^[^.]+\..+$/);
+      if(namespaceMatch){
+        return false;
+      }
+    }
+    
+    return true; // เข้ารหัสปกติ
+  }
+
+  // ตรวจสอบว่า string หรือ key มี blacklist pattern หรือไม่
+  function isBlacklisted(str){
+    return BLACKLIST_PATTERNS.some(pattern => str.includes(pattern));
+  }
+
+  // ตรวจสอบและแปลง namespace key
+  function processKey(key){
+    // ใช้ shouldObfuscateKey แทน
+    return key;
+  }
+
+  function processObj(obj, depth = 0){
     if(Array.isArray(obj)){
-      return obj.map(processObj);
+      return obj.map(item => processObj(item, depth));
     }
     if(obj && typeof obj === 'object'){
       const out = {};
       const keys = Object.keys(obj);
       for(const k of keys){
-        if(EXCLUDE_KEYS.includes(k)){
-          // ถ้า key อยู่ใน exclude ให้คงค่าเดิม (ไม่เข้าแปลงค่าภายใน)
+        if(!shouldObfuscateKey(k)){
+          // ถ้าไม่ควร obfuscate (exclude หรือ namespace ที่ไม่ล็อค) ให้คงค่าเดิม
           out[k] = obj[k];
         } else {
-          const ek = unicodeEscapeString(k);
-          out[ek] = processObj(obj[k]);
+          // obfuscate key ปกติ
+          const obfuscatedKey = unicodeEscapeString(k);
+          out[obfuscatedKey] = processObj(obj[k], depth + 1);
         }
       }
       return out;
     }
     if(typeof obj === 'string'){
+      // ตรวจสอบ blacklist ก่อน obfuscate
+      if(isBlacklisted(obj)){
+        // ถ้าพบ blacklist pattern ให้คืนเป็น string ปกติ
+        return obj;
+      }
       // คืนเป็นวัตถุ marker เพื่อให้ serialize รับรู้ว่าสตริงนี้ถูกแปลงแล้ว
       return { __mc_obf: true, v: unicodeEscapeString(obj) };
     }
     return obj;
   }
 
-  // Serializer ที่ระวังการ escape ให้ถูกต้อง: สำหรับสตริงปกติใช้ JSON.stringify แต่สำหรับสตริงที่ obfuscated แล้วให้ใส่ \u... ลงในไฟล์ JSON โดยตรง
+  // Serializer
   function serialize(val, indentLevel){
-    const indent = pretty.checked ? '  '.repeat(indentLevel) : '';
-    const newline = pretty.checked ? '\n' : '';
+    const isPretty = document.querySelector('input[name="format"]:checked').value === 'pretty';
+    const indent = isPretty ? '  '.repeat(indentLevel) : '';
+    const newline = isPretty ? '\n' : '';
+    const space = isPretty ? ' ' : '';
+    
     if(val === null) return 'null';
 
-    // marker สำหรับสตริงที่ obfuscated
     if(val && typeof val === 'object' && val.__mc_obf === true){
       const s = val.v.replace(/"/g,'\\"');
       return '"' + s + '"';
     }
 
     if(typeof val === 'string'){
-      // สำหรับสตริงปกติ ให้ JSON.stringify เพื่อ escape \ " \n เป็นต้น อย่างถูกต้อง
       return JSON.stringify(val);
     }
 
@@ -208,19 +361,17 @@
 
     if(Array.isArray(val)){
       if(val.length === 0) return '[]';
-      let parts = val.map(v => (pretty.checked ? indent + '  ' : '') + serialize(v, indentLevel+1));
+      let parts = val.map(v => (isPretty ? indent + '  ' : '') + serialize(v, indentLevel+1));
       return '[' + newline + parts.join(',' + newline) + newline + indent + ']';
     }
 
-    // object
     const keys = Object.keys(val);
     if(keys.length === 0) return '{}';
     let parts = keys.map(k => {
-      // key อาจเป็นสตริงที่มี \u escapes อยู่แล้ว (เราอยากให้มันอยู่ในไฟล์เป็น \u...) — ดังนั้นแค่ escape double quote ใน key
       const keyText = '"' + k.replace(/"/g,'\\"') + '"';
       const v = val[k];
       const ser = serialize(v, indentLevel+1);
-      return (pretty.checked ? indent + '  ' : '') + keyText + (pretty.checked ? ': ' : ':') + ser;
+      return (isPretty ? indent + '  ' : '') + keyText + ':' + space + ser;
     });
     return '{' + newline + parts.join(',' + newline) + newline + indent + '}';
   }
@@ -230,6 +381,7 @@
     if(!txt){ alert('กรุณาใส่ JSON ต้นฉบับลงไป'); return; }
     let parsed;
     try{ parsed = JSON.parse(txt); } catch(e){ alert('JSON ไม่ถูกต้อง: ' + e.message); return; }
+    
     const processed = processObj(parsed);
     const outText = serialize(processed, 0);
     output.value = outText;
@@ -241,13 +393,39 @@
     if(!output.value) { alert('ยังไม่มีผลลัพธ์ให้ดาวน์โหลด'); return; }
     const blob = new Blob([output.value], {type:'application/json;charset=utf-8'});
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'obfuscated.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    const a = document.createElement('a'); 
+    a.href = url; 
+    a.download = 'obfuscated.json'; 
+    document.body.appendChild(a); 
+    a.click(); 
+    a.remove(); 
+    URL.revokeObjectURL(url);
   });
 
-  // ตัวอย่างเริ่มต้น (เพิ่มเคสทดสอบ: emoji และตัวอักษรไทย)
-  input.value = '{\n  "controls": [\n    { "@style.ui_elements": {} },\n    { "@button_style.description_panel": {} },\n    { "@button_style.button_grid": {} },\n    { "normalKey": "Hello" },\n    { "emojiKey": "😀" },\n    { "thaiKey": "ไทย" }\n  ]\n}';
+  // ตัวอย่างเริ่มต้น
+  input.value = `{
+  "controls": [
+    { "@style.ui_elements": {} },
+    { "@button_style.description_panel": {} },
+    { "@button_style.button_grid": {} },
+    { "normalKey": "Hello" },
+    { "emojiKey": "😀" },
+    { "thaiKey": "ไทย" },
+    { "namespace.something": "test data" }
+  ],
+  "button_grid": {
+    "type": "stack_panel", 
+    "controls": [
+      {
+        "scrolling_panel@common.scrolling_panel": {
+          "$scrolling_content": "button_style.THIS_CODE_IS_CREATED_BY_MINEBIT_STORE__DO_NOT_SELL,_TRADE_OR_MODIFY_IT_WITHOUT_PERMISSIONYjRb38kJqnceT7Rg8Qr7"
+        }
+      }
+    ]
+  }
+}`;
 
-  loadExcludes();
+  loadData();
 })();
 </script>
 </body>
