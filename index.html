@@ -143,16 +143,25 @@
     renderExcludes();
   });
 
-  // แปลงสตริงเป็น \uXXXX
+  // แปลงสตริงเป็น \uXXXX (รองรับ surrogate pair)
   function unicodeEscapeString(s){
     let out = '';
-    for(let i=0;i<s.length;i++){
-      const code = s.charCodeAt(i);
-      out += '\u' + code.toString(16).padStart(4,'0');
+    for(const ch of s){
+      const cp = ch.codePointAt(0);
+      if(cp <= 0xFFFF){
+        out += '\\u' + cp.toString(16).padStart(4,'0');
+      } else {
+        // ถ้าเป็น code point เกิน 0xFFFF ให้ทำเป็น surrogate pair
+        const v = cp - 0x10000;
+        const high = 0xD800 + (v >> 10);
+        const low = 0xDC00 + (v & 0x3FF);
+        out += '\\u' + high.toString(16).padStart(4,'0') + '\\u' + low.toString(16).padStart(4,'0');
+      }
     }
     return out;
   }
 
+  // processObj จะคืนค่าวัตถุพิเศษสำหรับสตริงที่ถูก obfuscate เพื่อให้ serializer รู้ว่าต้องไม่ escape backslashes อีกครั้ง
   function processObj(obj){
     if(Array.isArray(obj)){
       return obj.map(processObj);
@@ -162,6 +171,7 @@
       const keys = Object.keys(obj);
       for(const k of keys){
         if(EXCLUDE_KEYS.includes(k)){
+          // ถ้า key อยู่ใน exclude ให้คงค่าเดิม (ไม่เข้าแปลงค่าภายใน)
           out[k] = obj[k];
         } else {
           const ek = unicodeEscapeString(k);
@@ -171,28 +181,42 @@
       return out;
     }
     if(typeof obj === 'string'){
-      return unicodeEscapeString(obj);
+      // คืนเป็นวัตถุ marker เพื่อให้ serialize รับรู้ว่าสตริงนี้ถูกแปลงแล้ว
+      return { __mc_obf: true, v: unicodeEscapeString(obj) };
     }
     return obj;
   }
 
+  // Serializer ที่ระวังการ escape ให้ถูกต้อง: สำหรับสตริงปกติใช้ JSON.stringify แต่สำหรับสตริงที่ obfuscated แล้วให้ใส่ \u... ลงในไฟล์ JSON โดยตรง
   function serialize(val, indentLevel){
     const indent = pretty.checked ? '  '.repeat(indentLevel) : '';
     const newline = pretty.checked ? '\n' : '';
     if(val === null) return 'null';
-    if(typeof val === 'string'){
-      const s = val.replace(/"/g,'\\"');
+
+    // marker สำหรับสตริงที่ obfuscated
+    if(val && typeof val === 'object' && val.__mc_obf === true){
+      const s = val.v.replace(/"/g,'\\"');
       return '"' + s + '"';
     }
+
+    if(typeof val === 'string'){
+      // สำหรับสตริงปกติ ให้ JSON.stringify เพื่อ escape \ " \n เป็นต้น อย่างถูกต้อง
+      return JSON.stringify(val);
+    }
+
     if(typeof val === 'number' || typeof val === 'boolean') return String(val);
+
     if(Array.isArray(val)){
       if(val.length === 0) return '[]';
       let parts = val.map(v => (pretty.checked ? indent + '  ' : '') + serialize(v, indentLevel+1));
       return '[' + newline + parts.join(',' + newline) + newline + indent + ']';
     }
+
+    // object
     const keys = Object.keys(val);
     if(keys.length === 0) return '{}';
     let parts = keys.map(k => {
+      // key อาจเป็นสตริงที่มี \u escapes อยู่แล้ว (เราอยากให้มันอยู่ในไฟล์เป็น \u...) — ดังนั้นแค่ escape double quote ใน key
       const keyText = '"' + k.replace(/"/g,'\\"') + '"';
       const v = val[k];
       const ser = serialize(v, indentLevel+1);
@@ -220,8 +244,8 @@
     const a = document.createElement('a'); a.href = url; a.download = 'obfuscated.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   });
 
-  // ตัวอย่างเริ่มต้น
-  input.value = '{\n  "controls": [\n    { "@style.ui_elements": {} },\n    { "@button_style.description_panel": {} },\n    { "@button_style.button_grid": {} },\n    { "normalKey": "Hello" }\n  ]\n}';
+  // ตัวอย่างเริ่มต้น (เพิ่มเคสทดสอบ: emoji และตัวอักษรไทย)
+  input.value = '{\n  "controls": [\n    { "@style.ui_elements": {} },\n    { "@button_style.description_panel": {} },\n    { "@button_style.button_grid": {} },\n    { "normalKey": "Hello" },\n    { "emojiKey": "😀" },\n    { "thaiKey": "ไทย" }\n  ]\n}';
 
   loadExcludes();
 })();
